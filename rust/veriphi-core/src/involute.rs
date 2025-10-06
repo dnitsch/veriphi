@@ -320,6 +320,7 @@ pub fn cond_involute_packet(
             let mut hasher = Sha256::new();
             hasher.update(chunk);
             hasher.update(salt);
+            hasher.update(fingerprint);
 
             let chunk_digest = hasher.finalize();
 
