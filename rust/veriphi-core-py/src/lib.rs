@@ -1,6 +1,7 @@
 use numpy::PyReadonlyArray1;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyList};
+use pyo3::types::{PyBytes, PyList, PyString, PyStringMethods, PyTuple};
+use std::borrow::Cow;
 use pyo3::{PyErr, PyObject, PyResult, Python};
 
 // custom imports
@@ -196,6 +197,51 @@ pub fn inv_data(
     Ok(output_list.into())
 }
 
+#[pyfunction]
+pub fn package_blob(py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<PyObject> {
+    fn as_field(obj: &Bound<'_, PyAny>) -> PyResult<utils::PackageField<'static>> {
+        if let Ok(array) = obj.extract::<PyReadonlyArray1<u8>>() {
+            let slice = array.as_slice().map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "numpy array not contiguous: {e}"
+                ))
+            })?;
+            return Ok(utils::PackageField::from(slice.to_vec()));
+        }
+
+        if let Ok(bytes) = obj.downcast::<PyBytes>() {
+            return Ok(utils::PackageField::from(bytes.as_bytes().to_vec()));
+        }
+
+        if let Ok(text) = obj.downcast::<PyString>() {
+            match text.to_cow()? {
+                Cow::Borrowed(s) => return Ok(utils::PackageField::from(s.as_bytes().to_vec())),
+                Cow::Owned(s) => return Ok(utils::PackageField::from(s.into_bytes())),
+            }
+        }
+
+        if let Ok(value) = obj.extract::<u64>() {
+            return Ok(utils::PackageField::from(value));
+        }
+
+        if let Ok(vec) = obj.extract::<Vec<u8>>() {
+            return Ok(utils::PackageField::from(vec));
+        }
+
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "Unsupported field type; expected bytes-like, numpy.uint8 array, str, or non-negative int",
+        ))
+    }
+
+    let mut fields: Vec<utils::PackageField<'static>> = Vec::with_capacity(args.len());
+    for item in args.iter() {
+        fields.push(as_field(&item)?);
+    }
+
+    let packed = utils::package_blob(fields);
+    Ok(PyBytes::new(py, &packed).into())
+}
+
 /// Create the Python module
 #[pymodule]
 pub fn veriphi_core_py(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -209,5 +255,6 @@ pub fn veriphi_core_py(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cond_hash_branch, py)?)?;
     m.add_function(wrap_pyfunction!(map_data, py)?)?;
     m.add_function(wrap_pyfunction!(inv_data, py)?)?;
+    m.add_function(wrap_pyfunction!(package_blob, py)?)?;
     Ok(())
 }

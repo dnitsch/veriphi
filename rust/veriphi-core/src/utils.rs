@@ -286,6 +286,81 @@ pub fn float_to_ordered_u32(f: f32) -> u32 {
     }
 }
 
+/// Describes a field that can be length-prefixed and appended to a binary payload.
+///
+/// Each field is encoded as `<u64_le length> || <raw bytes>`, matching the layout used by
+/// existing Python helpers. Moving the logic here ensures the same byte-level framing across
+/// language bindings.
+#[derive(Debug)]
+pub enum PackageField<'a> {
+    /// Borrowed binary data.
+    Bytes(&'a [u8]),
+    /// Owned binary data.
+    Owned(Vec<u8>),
+    /// UTF-8 text encoded on the fly.
+    Str(&'a str),
+    /// A 64-bit integer serialized in little-endian order.
+    U64(u64),
+}
+
+impl<'a> From<&'a [u8]> for PackageField<'a> {
+    fn from(value: &'a [u8]) -> Self {
+        Self::Bytes(value)
+    }
+}
+
+impl From<Vec<u8>> for PackageField<'_> {
+    fn from(value: Vec<u8>) -> Self {
+        Self::Owned(value)
+    }
+}
+
+impl<'a> From<&'a str> for PackageField<'a> {
+    fn from(value: &'a str) -> Self {
+        Self::Str(value)
+    }
+}
+
+impl From<u64> for PackageField<'_> {
+    fn from(value: u64) -> Self {
+        Self::U64(value)
+    }
+}
+
+fn push_len_prefixed(buffer: &mut Vec<u8>, bytes: &[u8]) {
+    buffer.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    buffer.extend_from_slice(bytes);
+}
+
+/// Packs an arbitrary series of fields into a single binary blob that mirrors the framing used
+/// by the Python `package_data` helpers.
+///
+/// The result layout is:
+///
+/// ```text
+/// <u64_le total_payload_len> ||
+///   Σ { <u64_le field_len> || <field_bytes> }
+/// ```
+pub fn package_blob<'a, I>(fields: I) -> Vec<u8>
+where
+    I: IntoIterator<Item = PackageField<'a>>,
+{
+    let mut blob = Vec::with_capacity(8);
+    blob.extend_from_slice(&[0u8; 8]); // reserve space for the total payload length
+
+    for field in fields {
+        match field {
+            PackageField::Bytes(data) => push_len_prefixed(&mut blob, data),
+            PackageField::Owned(data) => push_len_prefixed(&mut blob, &data),
+            PackageField::Str(text) => push_len_prefixed(&mut blob, text.as_bytes()),
+            PackageField::U64(value) => push_len_prefixed(&mut blob, &value.to_le_bytes()),
+        }
+    }
+
+    let payload_len = blob.len() - 8;
+    blob[..8].copy_from_slice(&(payload_len as u64).to_le_bytes());
+    blob
+}
 
 #[cfg(test)]
 mod tests {
