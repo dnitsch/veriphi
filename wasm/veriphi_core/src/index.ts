@@ -13,7 +13,6 @@ export async function initVeriphiWasm(threads?: number) {
 import * as utils from './utils.js';
 
 
-const te = new TextEncoder();
 const td = new TextDecoder();
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
@@ -27,23 +26,11 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function utf8(str: string): Uint8Array {
-  return te.encode(str);
-}
-
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
-}
-
-function u64le(n: number | bigint): Uint8Array {
-  const v = BigInt(n);
-  const bytes = new Uint8Array(8);
-  const dv = new DataView(bytes.buffer);
-  dv.setBigUint64(0, v, true);
-  return bytes;
 }
 
 function readU64leToNumber(buf: Uint8Array, offset: number): number {
@@ -248,17 +235,10 @@ export class SetupNode extends Utils {
      * @returns Serialized package array.
      */
     packageData(packet: Uint8Array, publicKey: Uint8Array, mode: string, identity: number): Uint8Array {
-        const modeBuf = utf8(mode);
-
-        const payload = concatBytes([
-            u64le(publicKey.length), publicKey,
-            u64le(packet.length),    packet,
-            u64le(modeBuf.length),   modeBuf,
-            u64le(identity),
-        ]);
-
-        const totalSizeHeader = u64le(payload.length);
-        return concatBytes([totalSizeHeader, payload]);
+        if (!Number.isInteger(identity) || identity < 0) {
+            throw new Error('identity must be a non-negative integer');
+        }
+        return vc.packageBlob([publicKey, packet, mode, identity]);
     }
 }
 
@@ -366,21 +346,16 @@ export class EncryptNode extends Utils {
         mode: string,
         identity: number,
         ): Uint8Array {
-        const packetBytes = embeddingDict.embedding;
-        const privateKey   = embeddingDict.privateKey;
-        const publicKey    = embeddingDict.publicKey;
-        const modeBytes    = utf8(mode);
-
-        const payload = concatBytes([
-            u64le(publicKey.length), publicKey,
-            u64le(privateKey.length), privateKey,
-            u64le(packetBytes.length), packetBytes,
-            u64le(modeBytes.length),  modeBytes,
-            u64le(identity),
+        if (!Number.isInteger(identity) || identity < 0) {
+            throw new Error('identity must be a non-negative integer');
+        }
+        return vc.packageBlob([
+            embeddingDict.publicKey,
+            embeddingDict.privateKey,
+            embeddingDict.embedding,
+            mode,
+            identity
         ]);
-
-        const total = u64le(payload.length);
-        return concatBytes([total, payload]);
     }
 
      /**
@@ -400,7 +375,11 @@ export class EncryptNode extends Utils {
         const modeSize   = readU64leToNumber(data, offset); offset += 8;
         const mode       = td.decode(sliceBytes(data, offset, modeSize)); offset += modeSize;
 
-        const identity   = readU64leToNumber(data, offset);
+        const identitySize = readU64leToNumber(data, offset); offset += 8;
+        if (identitySize !== 8) {
+            throw new Error(`Expected 8-byte identity, found ${identitySize}`);
+        }
+        const identity   = readU64leToNumber(data, offset); offset += identitySize;
 
         return [publicKey, packet, mode, identity];
     }
@@ -428,7 +407,11 @@ export class EncryptNode extends Utils {
         const modeSize    = readLength();
         const mode        = td.decode(readBytes(modeSize));
 
-        const identity    = readU64leToNumber(data, offset);
+        const identityLen = readLength();
+        if (identityLen !== 8) {
+            throw new Error(`Expected 8-byte identity, found ${identityLen}`);
+        }
+        const identity    = readU64leToNumber(data, offset); offset += identityLen;
 
         return { publicKey, privateKey, packet, mode, identity };
     }
@@ -474,7 +457,11 @@ export class DecryptNode extends Utils {
         const modeSize    = readLength();
         const mode        = td.decode(readBytes(modeSize));
 
-        const identity    = readU64leToNumber(data, offset);
+        const identityLen = readLength();
+        if (identityLen !== 8) {
+            throw new Error(`Expected 8-byte identity, found ${identityLen}`);
+        }
+        const identity    = readU64leToNumber(data, offset); offset += identityLen;
 
         return { publicKey, privateKey, packet, mode, identity };
     }

@@ -9,6 +9,7 @@ use getrandom;
 use aes::Aes256;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use ctr::cipher::{KeyIvInit, StreamCipher};
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 
 
@@ -291,10 +292,6 @@ fn r_kip_data(num_streams: usize, data: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Helpers for LE u64 packing
-fn pack_u64_le(v: u64) -> [u8; 8] {
-    v.to_le_bytes()
-}
 fn read_u64_le(buf: &[u8], off: &mut usize) -> u64 {
     let mut a = [0u8; 8];
     a.copy_from_slice(&buf[*off..*off + 8]);
@@ -430,29 +427,12 @@ impl SetupNode {
     }
 
     pub fn package_data(&self, packet: &[u8], public_key: &[u8], mode: &str, identity: u64) -> Vec<u8> {
-        let mode_bytes = mode.as_bytes();
-        let mut payload = Vec::with_capacity(
-            8 + public_key.len() +
-            8 + packet.len() +
-            8 + mode_bytes.len() +
-            8
-        );
-
-        payload.extend_from_slice(&pack_u64_le(public_key.len() as u64));
-        payload.extend_from_slice(public_key);
-
-        payload.extend_from_slice(&pack_u64_le(packet.len() as u64));
-        payload.extend_from_slice(packet);
-
-        payload.extend_from_slice(&pack_u64_le(mode_bytes.len() as u64));
-        payload.extend_from_slice(mode_bytes);
-
-        payload.extend_from_slice(&pack_u64_le(identity));
-
-        let mut out = Vec::with_capacity(8 + payload.len());
-        out.extend_from_slice(&pack_u64_le(payload.len() as u64));
-        out.extend_from_slice(&payload);
-        out
+        utils::package_blob([
+            utils::PackageField::from(public_key),
+            utils::PackageField::from(packet),
+            utils::PackageField::from(mode),
+            utils::PackageField::from(identity),
+        ])
     }
 }
 
@@ -501,7 +481,12 @@ impl EncryptNode {
         let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
         off += mode_len;
 
-        let identity = read_u64_le(data, &mut off);
+        let id_len = read_u64_le(data, &mut off) as usize;
+        assert!(off + id_len <= data.len(), "truncated identity field");
+        assert!(off + id_len <= data.len(), "truncated identity field");
+        let identity_bytes = &data[off..off + id_len];
+        assert_eq!(id_len, 8, "expected 8-byte identity");
+        let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length 8"));
 
         (public_key, packet, mode, identity)
     }
@@ -539,27 +524,13 @@ impl EncryptNode {
     }
 
     pub fn package_data(&self, emb: &Embedding, mode: &str, identity: u64) -> Result<Vec<u8>> {
-        let mode_bytes = mode.as_bytes();
-        let mut payload = Vec::new();
-
-        payload.extend_from_slice(&pack_u64_le(emb.public_key.len() as u64));
-        payload.extend_from_slice(&emb.public_key);
-
-        payload.extend_from_slice(&pack_u64_le(emb.private_key.len() as u64));
-        payload.extend_from_slice(&emb.private_key);
-
-        payload.extend_from_slice(&pack_u64_le(emb.embedding.len() as u64));
-        payload.extend_from_slice(&emb.embedding);
-
-        payload.extend_from_slice(&pack_u64_le(mode_bytes.len() as u64));
-        payload.extend_from_slice(mode_bytes);
-
-        payload.extend_from_slice(&pack_u64_le(identity));
-
-        let mut out = Vec::with_capacity(8 + payload.len());
-        out.extend_from_slice(&pack_u64_le(payload.len() as u64));
-        out.extend_from_slice(&payload);
-        Ok(out)
+        Ok(utils::package_blob([
+            utils::PackageField::from(emb.public_key.as_slice()),
+            utils::PackageField::from(emb.private_key.as_slice()),
+            utils::PackageField::from(emb.embedding.as_slice()),
+            utils::PackageField::from(mode),
+            utils::PackageField::from(identity),
+        ]))
     }
 
     pub fn _unpack_encrypted_data(&self, data: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, String, u64) {
@@ -581,7 +552,10 @@ impl EncryptNode {
         let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
         off += mode_len;
 
-        let identity = read_u64_le(data, &mut off);
+        let id_len = read_u64_le(data, &mut off) as usize;
+        let identity_bytes = &data[off..off + id_len];
+        assert_eq!(id_len, 8, "expected 8-byte identity");
+        let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length 8"));
         (public_key, private_key, packet, mode, identity)
     }
 }
@@ -623,7 +597,15 @@ impl DecryptNode {
         let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
         off += mode_len;
 
-        let identity = read_u64_le(data, &mut off);
+        let id_len = read_u64_le(data, &mut off) as usize;
+        if off + id_len > data.len() {
+            return Err(Error::UnexpectedEof);
+        }
+        if id_len != 8 {
+            return Err(Error::BadLength);
+        }
+        let identity_bytes = &data[off..off + id_len];
+        let identity = u64::from_le_bytes(identity_bytes.try_into().map_err(|_| Error::BadLength)?);
 
         Ok(Unpacked{public_key: public_key.clone(), 
             private_key: private_key.clone(),

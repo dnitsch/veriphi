@@ -3,6 +3,8 @@ use js_sys::{Array, BigInt, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_rayon::init_thread_pool;
 use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsCast;
+use std::convert::TryInto;
 
 
 use veriphi_core::utils;
@@ -146,4 +148,49 @@ pub fn inv_data(pub_key: &[u8], priv_keys: Array, data_sequences: Array) -> Resu
         out.push(&Uint8Array::from(&v[..]));
     }
     return Ok(out);
+}
+
+fn js_value_to_field(value: &JsValue) -> Result<utils::PackageField<'static>, JsValue> {
+    if value.is_instance_of::<Uint8Array>() {
+        let arr = Uint8Array::new(value);
+        return Ok(utils::PackageField::from(arr.to_vec()));
+    }
+
+    if let Some(text) = value.as_string() {
+        return Ok(utils::PackageField::from(text.into_bytes()));
+    }
+
+    if value.is_instance_of::<BigInt>() {
+        let bigint: BigInt = value.clone().dyn_into().map_err(|_| JsError::new("Failed to interpret value as BigInt"))?;
+        let s_js = bigint
+            .to_string(10)
+            .map_err(|_| JsError::new("Failed to convert BigInt to string"))?;
+        let s: String = s_js.into();
+        let parsed = s
+            .parse::<u64>()
+            .map_err(|_| JsError::new("BigInt value out of u64 range"))?;
+        return Ok(utils::PackageField::from(parsed));
+    }
+
+    if let Some(num) = value.as_f64() {
+        if num < 0.0 || num.fract() != 0.0 {
+            return Err(JsError::new("Numeric identity must be a non-negative integer").into());
+        }
+        if num > (u64::MAX as f64) {
+            return Err(JsError::new("Numeric identity exceeds u64 range").into());
+        }
+        return Ok(utils::PackageField::from(num as u64));
+    }
+
+    Err(JsError::new("Unsupported field type for packageBlob").into())
+}
+
+#[wasm_bindgen(js_name = packageBlob)]
+pub fn package_blob(fields: Array) -> Result<Vec<u8>, JsValue> {
+    let mut items: Vec<utils::PackageField<'static>> =
+        Vec::with_capacity(fields.length() as usize);
+    for value in fields.iter() {
+        items.push(js_value_to_field(&value)?);
+    }
+    Ok(utils::package_blob(items))
 }
