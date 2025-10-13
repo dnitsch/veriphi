@@ -362,6 +362,95 @@ where
     blob
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum PacketDecodeError {
+    #[error("declared payload length {declared} exceeds available bytes {available}")]
+    LengthMismatch { declared: usize, available: usize },
+    #[error("packet truncated while reading {context}")]
+    Truncated { context: &'static str },
+    #[error("expected 8-byte identity field, found {len} bytes")]
+    InvalidIdentityLength { len: usize },
+    #[error("utf-8 decoding failed: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+}
+
+fn read_u64(data: &[u8], offset: &mut usize, context: &'static str) -> Result<u64, PacketDecodeError> {
+    if data.len().saturating_sub(*offset) < 8 {
+        return Err(PacketDecodeError::Truncated { context });
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&data[*offset..*offset + 8]);
+    *offset += 8;
+    Ok(u64::from_le_bytes(buf))
+}
+
+fn read_bytes(data: &[u8], offset: &mut usize, len: usize, context: &'static str) -> Result<Vec<u8>, PacketDecodeError> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    if *offset > data.len().saturating_sub(len) {
+        return Err(PacketDecodeError::Truncated { context });
+    }
+    let out = data[*offset..*offset + len].to_vec();
+    *offset += len;
+    Ok(out)
+}
+
+fn read_len_prefixed_field(data: &[u8], offset: &mut usize, context: &'static str) -> Result<Vec<u8>, PacketDecodeError> {
+    let len = read_u64(data, offset, context)? as usize;
+    read_bytes(data, offset, len, context)
+}
+
+pub fn unpack_setup_packet(data: &[u8]) -> Result<(Vec<u8>, Vec<u8>, String, u64), PacketDecodeError> {
+    if data.len() < 8 {
+        return Err(PacketDecodeError::Truncated { context: "total length" });
+    }
+    let mut offset = 0usize;
+    let payload_len = read_u64(data, &mut offset, "total length")? as usize;
+    let remaining = data.len().saturating_sub(offset);
+    if payload_len != remaining {
+        return Err(PacketDecodeError::LengthMismatch { declared: payload_len, available: remaining });
+    }
+
+    let public_key = read_len_prefixed_field(data, &mut offset, "public key")?;
+    let packet = read_len_prefixed_field(data, &mut offset, "packet")?;
+    let mode_bytes = read_len_prefixed_field(data, &mut offset, "mode")?;
+    let identity_len = read_u64(data, &mut offset, "identity length")? as usize;
+    let identity_bytes = read_bytes(data, &mut offset, identity_len, "identity value")?;
+    if identity_len != 8 {
+        return Err(PacketDecodeError::InvalidIdentityLength { len: identity_len });
+    }
+    let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length verified as 8"));
+
+    let mode = String::from_utf8(mode_bytes)?;
+    Ok((public_key, packet, mode, identity))
+}
+
+pub fn unpack_encrypted_packet(data: &[u8]) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, String, u64), PacketDecodeError> {
+    if data.len() < 8 {
+        return Err(PacketDecodeError::Truncated { context: "total length" });
+    }
+    let mut offset = 0usize;
+    let payload_len = read_u64(data, &mut offset, "total length")? as usize;
+    let remaining = data.len().saturating_sub(offset);
+    if payload_len != remaining {
+        return Err(PacketDecodeError::LengthMismatch { declared: payload_len, available: remaining });
+    }
+
+    let public_key = read_len_prefixed_field(data, &mut offset, "public key")?;
+    let private_key = read_len_prefixed_field(data, &mut offset, "private key")?;
+    let packet = read_len_prefixed_field(data, &mut offset, "packet")?;
+    let mode_bytes = read_len_prefixed_field(data, &mut offset, "mode")?;
+    let identity_len = read_u64(data, &mut offset, "identity length")? as usize;
+    let identity_bytes = read_bytes(data, &mut offset, identity_len, "identity value")?;
+    if identity_len != 8 {
+        return Err(PacketDecodeError::InvalidIdentityLength { len: identity_len });
+    }
+    let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length verified as 8"));
+    let mode = String::from_utf8(mode_bytes)?;
+    Ok((public_key, private_key, packet, mode, identity))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +566,50 @@ mod tests {
         assert_ne!(float_to_ordered_u32(nan1), float_to_ordered_u32(ninf));
         // Distinct NaNs may map differently (expected):
         let _ = (nan1, nan2);
+    }
+
+    #[test]
+    fn package_and_unpack_setup_packet_roundtrip() {
+        let public = vec![1, 2, 3];
+        let packet = vec![4, 5, 6, 7];
+        let mode = "E2";
+        let identity = 42u64;
+
+        let blob = package_blob([
+            PackageField::from(public.as_slice()),
+            PackageField::from(packet.as_slice()),
+            PackageField::from(mode),
+            PackageField::from(identity),
+        ]);
+
+        let (pub_out, pkt_out, mode_out, id_out) = unpack_setup_packet(&blob).expect("unpack");
+        assert_eq!(pub_out, public);
+        assert_eq!(pkt_out, packet);
+        assert_eq!(mode_out, mode);
+        assert_eq!(id_out, identity);
+    }
+
+    #[test]
+    fn package_and_unpack_encrypted_packet_roundtrip() {
+        let public = vec![9, 1, 1];
+        let private = vec![2, 4, 6, 8];
+        let packet = vec![7, 7, 7];
+        let mode = "E3";
+        let identity = 7u64;
+
+        let blob = package_blob([
+            PackageField::from(public.as_slice()),
+            PackageField::from(private.as_slice()),
+            PackageField::from(packet.as_slice()),
+            PackageField::from(mode),
+            PackageField::from(identity),
+        ]);
+
+        let (pub_out, priv_out, pkt_out, mode_out, id_out) = unpack_encrypted_packet(&blob).expect("unpack");
+        assert_eq!(pub_out, public);
+        assert_eq!(priv_out, private);
+        assert_eq!(pkt_out, packet);
+        assert_eq!(mode_out, mode);
+        assert_eq!(id_out, identity);
     }
 }

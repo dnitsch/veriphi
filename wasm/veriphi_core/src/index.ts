@@ -358,29 +358,17 @@ export class EncryptNode extends Utils {
         ]);
     }
 
-     /**
+    /**
      * Unpackages serialized data from a setup node back into its components.
      * @param data Serialized buffer.
      * @returns Tuple [publicKey, packet, mode, identity].
      */
     unpackageData(data: Uint8Array): [Uint8Array, Uint8Array, string, number] {
-        let offset = 8; // skip total header
-
-        const pubKeySize = readU64leToNumber(data, offset); offset += 8;
-        const publicKey  = sliceBytes(data, offset, pubKeySize); offset += pubKeySize;
-
-        const packetSize = readU64leToNumber(data, offset); offset += 8;
-        const packet     = sliceBytes(data, offset, packetSize); offset += packetSize;
-
-        const modeSize   = readU64leToNumber(data, offset); offset += 8;
-        const mode       = td.decode(sliceBytes(data, offset, modeSize)); offset += modeSize;
-
-        const identitySize = readU64leToNumber(data, offset); offset += 8;
-        if (identitySize !== 8) {
-            throw new Error(`Expected 8-byte identity, found ${identitySize}`);
-        }
-        const identity   = readU64leToNumber(data, offset); offset += identitySize;
-
+        const result = vc.unpackSetupPacket(data);
+        const publicKey = new Uint8Array(result[0] as Uint8Array);
+        const packet = new Uint8Array(result[1] as Uint8Array);
+        const mode = result[2] as string;
+        const identity = Number(result[3]);
         return [publicKey, packet, mode, identity];
     }
 
@@ -390,28 +378,12 @@ export class EncryptNode extends Utils {
      * @returns Packet dictionary with keys, packet, mode, and identity.
      */
     _unpackEncryptedData(data: Uint8Array): PacketDict {
-        let offset = 8;
-
-        const readLength = () => { const n = readU64leToNumber(data, offset); offset += 8; return n; };
-        const readBytes  = (len: number) => { const b = sliceBytes(data, offset, len); offset += len; return b; };
-
-        const pubKeySize = readLength();
-        const publicKey  = readBytes(pubKeySize);
-
-        const privKeySize = readLength();
-        const privateKey  = readBytes(privKeySize);
-
-        const packetSize  = readLength();
-        const packet      = readBytes(packetSize);
-
-        const modeSize    = readLength();
-        const mode        = td.decode(readBytes(modeSize));
-
-        const identityLen = readLength();
-        if (identityLen !== 8) {
-            throw new Error(`Expected 8-byte identity, found ${identityLen}`);
-        }
-        const identity    = readU64leToNumber(data, offset); offset += identityLen;
+        const result = vc.unpackEncryptedPacket(data);
+        const publicKey = new Uint8Array(result[0] as Uint8Array);
+        const privateKey = new Uint8Array(result[1] as Uint8Array);
+        const packet = new Uint8Array(result[2] as Uint8Array);
+        const mode = result[3] as string;
+        const identity = Number(result[4]);
 
         return { publicKey, privateKey, packet, mode, identity };
     }
@@ -440,28 +412,12 @@ export class DecryptNode extends Utils {
      * @returns Packet dictionary.
      */
     unpackageData(data: Uint8Array): PacketDict {
-        let offset = 8;
-
-        const readLength = () => { const n = readU64leToNumber(data, offset); offset += 8; return n; };
-        const readBytes  = (len: number) => { const b = sliceBytes(data, offset, len); offset += len; return b; };
-
-        const pubKeySize = readLength();
-        const publicKey  = readBytes(pubKeySize);
-
-        const privKeySize = readLength();
-        const privateKey  = readBytes(privKeySize);
-
-        const packetSize  = readLength();
-        const packet      = readBytes(packetSize);
-
-        const modeSize    = readLength();
-        const mode        = td.decode(readBytes(modeSize));
-
-        const identityLen = readLength();
-        if (identityLen !== 8) {
-            throw new Error(`Expected 8-byte identity, found ${identityLen}`);
-        }
-        const identity    = readU64leToNumber(data, offset); offset += identityLen;
+        const result = vc.unpackEncryptedPacket(data);
+        const publicKey = new Uint8Array(result[0] as Uint8Array);
+        const privateKey = new Uint8Array(result[1] as Uint8Array);
+        const packet = new Uint8Array(result[2] as Uint8Array);
+        const mode = result[3] as string;
+        const identity = Number(result[4]);
 
         return { publicKey, privateKey, packet, mode, identity };
     }

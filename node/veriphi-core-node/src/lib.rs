@@ -2,11 +2,10 @@ use napi::bindgen_prelude::BigInt;
 use napi::bindgen_prelude::Buffer;
 use napi_derive::napi;
 
-use veriphi_core::utils;
-use veriphi_core::involute;
-use veriphi_core::encrypt;
 use veriphi_core::decrypt;
-
+use veriphi_core::encrypt;
+use veriphi_core::involute;
+use veriphi_core::utils;
 
 #[napi]
 pub fn get_chunk_size(packet: Buffer) -> f64 {
@@ -45,7 +44,6 @@ pub fn cycle_packet(
     .map_err(|e| napi::Error::from_reason(format!("Cycle error: {}", e)))?;
     return Ok(Buffer::from(cycled));
 }
-
 
 #[napi]
 pub fn gen_key(party_id: String, purpose: String, master_seed: Buffer) -> napi::Result<Buffer> {
@@ -132,4 +130,56 @@ pub fn inv_data(
     let inv_data = decrypt::inv_data(&pub_key, &rust_priv, rust_data, size as usize);
     let output: Vec<Buffer> = inv_data.into_iter().map(|b| Buffer::from(b)).collect();
     return Ok(output);
+}
+
+#[napi]
+pub fn package_blob(buffers: Vec<Buffer>, mode: String, identity: f64) -> napi::Result<Buffer> {
+    if identity < 0.0 || identity.fract() != 0.0 {
+        return Err(napi::Error::from_reason(
+            "identity must be a non-negative integer".to_string(),
+        ));
+    }
+    if identity > (u64::MAX as f64) {
+        return Err(napi::Error::from_reason(
+            "identity exceeds u64 range".to_string(),
+        ));
+    }
+
+    let identity_u64 = identity as u64;
+
+    let mut fields: Vec<utils::PackageField<'static>> = buffers
+        .into_iter()
+        .map(|b| utils::PackageField::from(Vec::<u8>::from(b)))
+        .collect();
+    fields.push(utils::PackageField::from(mode.into_bytes()));
+    fields.push(utils::PackageField::from(identity_u64));
+    Ok(Buffer::from(utils::package_blob(fields)))
+}
+
+#[napi]
+pub fn unpack_setup_packet(data: Buffer) -> napi::Result<(Buffer, Buffer, String, u64)> {
+    let (public_key, packet, mode, identity) = utils::unpack_setup_packet(&data)
+        .map_err(|e| napi::Error::from_reason(format!("unpack error: {}", e)))?;
+    Ok((
+        Buffer::from(public_key),
+        Buffer::from(packet),
+        mode,
+        identity,
+    ))
+}
+
+#[napi]
+pub fn unpack_encrypted_packet(
+    data: Buffer,
+) -> napi::Result<(Buffer, Buffer, Buffer, String, u64)> {
+    let (public_key, private_key, packet, mode, identity) =
+        utils::unpack_encrypted_packet(&data)
+            .map_err(|e| napi::Error::from_reason(format!("unpack error: {}", e)))?;
+    Ok((
+        Buffer::from(public_key),
+        Buffer::from(private_key),
+        Buffer::from(packet),
+        mode,
+        identity,
+    ))
 }

@@ -18,4 +18,10 @@ export declare function involutePacket(packet: Buffer, salt: Buffer, chunkSize: 
 
 export declare function mapData(pubKey: Buffer, privKey: Buffer, identity: number, dataSequence: Array<Buffer>): Buffer
 
+export declare function packageBlob(buffers: Array<Buffer>, mode: string, identity: number): Buffer
+
 export declare function prepCondition(lowBound: number, highBound: number, salt: Buffer): [bigint, bigint]
+
+export declare function unpackEncryptedPacket(data: Buffer): [Buffer, Buffer, Buffer, string, bigint]
+
+export declare function unpackSetupPacket(data: Buffer): [Buffer, Buffer, string, bigint]

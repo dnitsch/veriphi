@@ -9,7 +9,6 @@ use getrandom;
 use aes::Aes256;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use ctr::cipher::{KeyIvInit, StreamCipher};
-use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 
 
@@ -292,11 +291,13 @@ fn r_kip_data(num_streams: usize, data: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-fn read_u64_le(buf: &[u8], off: &mut usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&buf[*off..*off + 8]);
-    *off += 8;
-    u64::from_le_bytes(a)
+fn map_packet_error(err: utils::PacketDecodeError) -> Error {
+    match err {
+        utils::PacketDecodeError::LengthMismatch { .. } => Error::BadLength,
+        utils::PacketDecodeError::Truncated { .. } => Error::Truncated,
+        utils::PacketDecodeError::InvalidIdentityLength { .. } => Error::BadLength,
+        utils::PacketDecodeError::Utf8(e) => Error::Utf8(e),
+    }
 }
 
 ///////////////////////
@@ -468,27 +469,10 @@ impl EncryptNode {
     }
 
     pub fn unpackage_data(&self, data: &[u8]) -> (Vec<u8>, Vec<u8>, String, u64) {
-        let mut off = 8; // skip total size
-        let pub_len = read_u64_le(data, &mut off) as usize;
-        let public_key = data[off..off + pub_len].to_vec();
-        off += pub_len;
-
-        let pkt_len = read_u64_le(data, &mut off) as usize;
-        let packet = data[off..off + pkt_len].to_vec();
-        off += pkt_len;
-
-        let mode_len = read_u64_le(data, &mut off) as usize;
-        let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
-        off += mode_len;
-
-        let id_len = read_u64_le(data, &mut off) as usize;
-        assert!(off + id_len <= data.len(), "truncated identity field");
-        assert!(off + id_len <= data.len(), "truncated identity field");
-        let identity_bytes = &data[off..off + id_len];
-        assert_eq!(id_len, 8, "expected 8-byte identity");
-        let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length 8"));
-
-        (public_key, packet, mode, identity)
+        match utils::unpack_setup_packet(data) {
+            Ok((public_key, packet, mode, identity)) => (public_key, packet, mode, identity),
+            Err(err) => panic!("invalid setup packet: {err}"),
+        }
     }
 
     pub fn encrypt_data(&self, packet: &[u8], private_key: &[u8], public_key: &[u8], mode: &str, identity: u64) -> Result<Embedding> {
@@ -534,29 +518,7 @@ impl EncryptNode {
     }
 
     pub fn _unpack_encrypted_data(&self, data: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>, String, u64) {
-        let mut off = 8;
-
-        let pub_len = read_u64_le(data, &mut off) as usize;
-        let public_key = data[off..off + pub_len].to_vec();
-        off += pub_len;
-
-        let priv_len = read_u64_le(data, &mut off) as usize;
-        let private_key = data[off..off + priv_len].to_vec();
-        off += priv_len;
-
-        let pkt_len = read_u64_le(data, &mut off) as usize;
-        let packet = data[off..off + pkt_len].to_vec();
-        off += pkt_len;
-
-        let mode_len = read_u64_le(data, &mut off) as usize;
-        let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
-        off += mode_len;
-
-        let id_len = read_u64_le(data, &mut off) as usize;
-        let identity_bytes = &data[off..off + id_len];
-        assert_eq!(id_len, 8, "expected 8-byte identity");
-        let identity = u64::from_le_bytes(identity_bytes.try_into().expect("identity length 8"));
-        (public_key, private_key, packet, mode, identity)
+        utils::unpack_encrypted_packet(data).expect("invalid encrypted packet layout")
     }
 }
 
@@ -579,40 +541,17 @@ impl DecryptNode {
     }
 
     pub fn unpackage_data(&self, data: &[u8]) -> Result<Unpacked> {
-        let mut off = 8;
+        let (public_key, private_key, packet, mode, identity) =
+            utils::unpack_encrypted_packet(data).map_err(map_packet_error)?;
 
-        let pub_len = read_u64_le(data, &mut off) as usize;
-        let public_key = data[off..off + pub_len].to_vec();
-        off += pub_len;
-
-        let priv_len = read_u64_le(data, &mut off) as usize;
-        let private_key = data[off..off + priv_len].to_vec();
-        off += priv_len;
-
-        let pkt_len = read_u64_le(data, &mut off) as usize;
-        let packet = data[off..off + pkt_len].to_vec();
-        off += pkt_len;
-
-        let mode_len = read_u64_le(data, &mut off) as usize;
-        let mode = String::from_utf8_lossy(&data[off..off + mode_len]).to_string();
-        off += mode_len;
-
-        let id_len = read_u64_le(data, &mut off) as usize;
-        if off + id_len > data.len() {
-            return Err(Error::UnexpectedEof);
-        }
-        if id_len != 8 {
-            return Err(Error::BadLength);
-        }
-        let identity_bytes = &data[off..off + id_len];
-        let identity = u64::from_le_bytes(identity_bytes.try_into().map_err(|_| Error::BadLength)?);
-
-        Ok(Unpacked{public_key: public_key.clone(), 
-            private_key: private_key.clone(),
-            packet: packet.clone(), 
-            mode: mode.clone(), 
-            identity: identity,
-            deobf: None})
+        Ok(Unpacked{
+            public_key,
+            private_key,
+            packet,
+            mode,
+            identity,
+            deobf: None,
+        })
     }
 
     pub fn recover_packets(

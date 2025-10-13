@@ -220,26 +220,10 @@ export class SetupNode extends Utils {
      * @returns Serialized package buffer.
      */
     packageData(packet: Buffer, publicKey: Buffer, mode: string, identity: number): Buffer {
-        const modeBuf = Buffer.from(mode, 'utf-8');
-
-        // Helper to pack UInt64LE (like struct.pack('<Q', val))
-        function packUInt64LE(val: number): Buffer {
-            const buf = Buffer.alloc(8);
-            buf.writeBigUInt64LE(BigInt(val));
-            return buf;
+        if (!Number.isInteger(identity) || identity < 0) {
+            throw new Error('identity must be a non-negative integer');
         }
-
-        const payload = Buffer.concat([
-            packUInt64LE(publicKey.length),
-            publicKey,
-            packUInt64LE(packet.length),
-            packet,
-            packUInt64LE(modeBuf.length),
-            modeBuf,
-            packUInt64LE(identity)        
-        ]);
-        const totalSizeHeader = packUInt64LE(payload.length);
-        return Buffer.concat([totalSizeHeader, payload]);
+        return vc.packageBlob([publicKey, packet], mode, identity);
     }
 }
 
@@ -358,77 +342,32 @@ export class EncryptNode extends Utils {
         mode: string,
         identity: number,
     ): Buffer {
-        const packetBytes = embeddingDict.embedding;
-        const privateKey = Buffer.from(embeddingDict.privateKey);
-        const publicKey = Buffer.from(embeddingDict.publicKey);
-        const modeBytes = Buffer.from(mode, 'utf-8');
-        
-        function lenHeader(len: number): Buffer {
-            const buf = Buffer.alloc(8);
-            buf.writeBigUInt64LE(BigInt(len), 0);
-            return buf;
+        if (!Number.isInteger(identity) || identity < 0) {
+            throw new Error('identity must be a non-negative integer');
         }
-
-        const payload = Buffer.concat([
-            lenHeader(publicKey.length),
-            publicKey,
-            lenHeader(privateKey.length),
-            privateKey,
-            lenHeader(packetBytes.length),
-            packetBytes,
-
-            lenHeader(modeBytes.length),
-            modeBytes,
-            lenHeader(identity),
-        ]);
-
-        const totalSizeHeader = Buffer.alloc(8);
-        totalSizeHeader.writeBigUInt64LE(BigInt(payload.length), 0);
-
-        return Buffer.concat([totalSizeHeader, payload]);
+        return vc.packageBlob(
+            [
+                Buffer.from(embeddingDict.publicKey),
+                Buffer.from(embeddingDict.privateKey),
+                Buffer.from(embeddingDict.embedding)
+            ],
+            mode,
+            identity
+        );
     }
 
-     /**
+    /**
      * Unpackages serialized data from a setup node back into its components.
      * @param data Serialized buffer.
      * @returns Tuple [publicKey, packet, mode, identity].
      */
     unpackageData(data: Buffer): [Buffer, Buffer, string, number] {
-        let offset = 8; // skip initial header (UInt64LE)
-
-        // Helper to read UInt64LE from buffer (returns number)
-        function readUInt64LE(buf: Buffer, off: number): number {
-            // Buffer has readBigUInt64LE, convert safely to Number
-            const bigVal = buf.readBigUInt64LE(off);
-            const numVal = Number(bigVal);
-            if (numVal > Number.MAX_SAFE_INTEGER) {
-            throw new Error('Size exceeds safe integer range');
-            }
-            return numVal;
+        const [publicKey, packetBuffer, mode, identityBig] = vc.unpackSetupPacket(data);
+        const identity = Number(identityBig);
+        if (!Number.isSafeInteger(identity)) {
+            throw new Error('Identity exceeds JavaScript safe integer range');
         }
-
-        // Extract publicKey
-        const pubKeySize = readUInt64LE(data, offset);
-        offset += 8;
-        const publicKey = data.subarray(offset, offset + pubKeySize);
-        offset += pubKeySize;
-
-        // Extract packet
-        const packetSize = readUInt64LE(data, offset);
-        offset += 8;
-        const packetBytes = data.subarray(offset, offset + packetSize);
-        offset += packetSize;
-        
-
-        // Extract mode
-        const modeSize = readUInt64LE(data, offset);
-        offset += 8;
-        const mode = data.subarray(offset, offset + modeSize).toString('utf-8');
-        offset += modeSize;
-
-        // Extract label
-        const identity = readUInt64LE(data, offset);
-        return [publicKey, packetBytes, mode, identity];
+        return [publicKey as Buffer, packetBuffer as Buffer, mode as string, identity];
     }
 
     /**
@@ -437,47 +376,23 @@ export class EncryptNode extends Utils {
      * @returns Packet dictionary with keys, packet, mode, and identity.
      */
     _unpackEncryptedData(data: Buffer): PacketDict {
-        let offset = 8; // Skip total size header
-
-        function readLength(): number {
-            const len = Number(data.readBigUInt64LE(offset));
-            offset += 8;
-            return len;
+        const [publicKey, privateKey, packetBuffer, mode, identityBig] = vc.unpackEncryptedPacket(data);
+        const identity = Number(identityBig);
+        if (!Number.isSafeInteger(identity)) {
+            throw new Error('Identity exceeds JavaScript safe integer range');
         }
+        const pubBuffer = publicKey as Buffer;
+        const privBuffer = privateKey as Buffer;
+        const packetBufferView = packetBuffer as Buffer;
+        const publicKeyArray = new Uint8Array(pubBuffer.buffer, pubBuffer.byteOffset, pubBuffer.byteLength);
+        const privateKeyArray = new Uint8Array(privBuffer.buffer, privBuffer.byteOffset, privBuffer.byteLength);
+        const packet = new Uint8Array(packetBufferView.buffer, packetBufferView.byteOffset, packetBufferView.byteLength);
 
-        // Extract a Buffer slice of given length
-        function readBuffer(len: number): Buffer {
-            const buf = data.subarray(offset, offset + len);
-            offset += len;
-            return buf;
-        }
-
-        // Extract publicKey
-        const pubKeySize = readLength();
-        const publicKey = readBuffer(pubKeySize);
-
-        // Extract privateKey
-        const privKeySize = readLength();
-        const privateKey = readBuffer(privKeySize);
-
-        // Extract packet
-        const packetSize = readLength();
-        const packetBuffer = readBuffer(packetSize);
-        const packet = new Uint8Array(packetBuffer.buffer, packetBuffer.byteOffset, packetBuffer.byteLength);
-
-        // Extract mode string
-        const modeSize = readLength();
-        const mode = data.subarray(offset, offset + modeSize).toString('utf8');
-        offset += modeSize;
-
-        // Extract label string
-        
-        const identity = Number(data.readBigUInt64LE(offset));
         return {
-            publicKey: publicKey,
-            privateKey: privateKey,
+            publicKey: publicKeyArray,
+            privateKey: privateKeyArray,
             packet: packet,
-            mode: mode,
+            mode: mode as string,
             identity: identity
         };
     }
@@ -506,50 +421,21 @@ export class DecryptNode extends Utils {
      * @returns Packet dictionary.
      */
     unpackageData(data: Buffer): PacketDict {
-        let offset = 8; // Skip total size header
-
-        const readLength = (): number => {
-            const len = Number(data.readBigUInt64LE(offset));
-            offset += 8;
-            return len;
-        };
-        function readUInt64LE(buf: Buffer, off: number): number {
-            // Buffer has readBigUInt64LE, convert safely to Number
-            const bigVal = buf.readBigUInt64LE(off);
-            const numVal = Number(bigVal);
-            if (numVal > Number.MAX_SAFE_INTEGER) {
-            throw new Error('Size exceeds safe integer range');
-            }
-            return numVal;
+        const [publicKey, privateKey, packetBuffer, mode, identityBig] = vc.unpackEncryptedPacket(data);
+        const identity = Number(identityBig);
+        if (!Number.isSafeInteger(identity)) {
+            throw new Error('Identity exceeds JavaScript safe integer range');
         }
-
-        const readBuffer = (len: number): Buffer => {
-        const buf = data.subarray(offset, offset + len);
-        offset += len;
-        return buf;
-        };
-
-        const pubKeySize = readLength();
-        const publicKey = readBuffer(pubKeySize);
-
-        const privKeySize = readLength();
-        const privateKey = readBuffer(privKeySize);
-
-        const packetSize = readLength();
-        const packetBuffer = readBuffer(packetSize);
-        const packet = new Uint8Array(packetBuffer.buffer, packetBuffer.byteOffset, packetBuffer.byteLength);
-
-        const modeSize = readLength();
-        const mode = data.subarray(offset, offset + modeSize).toString("utf8");
-        offset += modeSize;
-
-        const identity = readUInt64LE(data, offset);
+        const pubBuffer = publicKey as Buffer;
+        const privBuffer = privateKey as Buffer;
+        const packetBufferView = packetBuffer as Buffer;
+        const packet = new Uint8Array(packetBufferView.buffer, packetBufferView.byteOffset, packetBufferView.byteLength);
 
         return {
-            publicKey: publicKey,
-            privateKey: privateKey,
+            publicKey: new Uint8Array(pubBuffer.buffer, pubBuffer.byteOffset, pubBuffer.byteLength),
+            privateKey: new Uint8Array(privBuffer.buffer, privBuffer.byteOffset, privBuffer.byteLength),
             packet: packet,
-            mode: mode,
+            mode: mode as string,
             identity: identity
         };
     }

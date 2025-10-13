@@ -1,7 +1,6 @@
 import veriphi_core as vc
 import numpy as np
 import secrets
-import struct
 from numpy.typing import NDArray
 from . import utils as utils
 
@@ -398,36 +397,9 @@ class EncryptNode(Utils):
                 - mode (str): The encryption mode
                 - identity (int): The node identifier
         """
-        offset = 8
-        
-        # Extract public_key
-        pub_key_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        public_key = data[offset:offset+pub_key_size]
-        offset += pub_key_size
-        
-        # Extract packet
-        packet_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        packet_bytes = data[offset:offset+packet_size]
+        public_key_bytes, packet_bytes, mode, identity = vc.unpack_setup_packet(data)
         packet = np.frombuffer(packet_bytes, dtype=np.uint8)
-        offset += packet_size
-        
-        # Extract mode
-        mode_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        mode = data[offset:offset+mode_size].decode('utf-8')
-        offset += mode_size
-        
-        # Extract identity (length-prefixed)
-        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        identity_bytes = data[offset:offset+identity_size]
-        offset += identity_size
-        if identity_size != 8:
-            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
-        identity = struct.unpack('<Q', identity_bytes)[0]
-        return public_key, packet, mode, identity
+        return public_key_bytes, packet, mode, identity
         
 
     def _unpack_encrypted_data(self, data: bytes) -> dict:
@@ -449,44 +421,11 @@ class EncryptNode(Utils):
                 - 'mode' (str): The encryption mode
                 - 'identity' (int): The node identifier
         """
-        offset = 8  # Skip the total size header
-
-        # Extract public_key
-        pub_key_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        public_key = data[offset:offset+pub_key_size]
-        offset += pub_key_size
-
-        # Extract private_key
-        priv_key_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        private_key = data[offset:offset+priv_key_size]
-        offset += priv_key_size
-
-        # Extract packet
-        packet_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        packet_bytes = data[offset:offset+packet_size]
+        public_key_bytes, private_key_bytes, packet_bytes, mode, identity = vc.unpack_encrypted_packet(data)
         packet = np.frombuffer(packet_bytes, dtype=np.uint8)
-        offset += packet_size
-
-        # Extract mode
-        mode_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        mode = data[offset:offset+mode_size].decode('utf-8')
-        offset += mode_size
-
-        # Extract identity
-        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        identity_bytes = data[offset:offset+identity_size]
-        offset += identity_size
-        if identity_size != 8:
-            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
-        identity = struct.unpack('<Q', identity_bytes)[0]
         data_dict = {
-            "public_key": public_key,
-            "private_key": private_key,
+            "public_key": public_key_bytes,
+            "private_key": private_key_bytes,
             "packet": packet,
             "mode": mode,
             "identity": identity
@@ -530,44 +469,11 @@ class DecryptNode(Utils):
         Returns:
             dict: Dictionary containing public/private keys, packet, mode, and identity.
         """
-        offset = 8  # Skip the total size header
-
-        # Extract public_key
-        pub_key_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        public_key = data[offset:offset+pub_key_size]
-        offset += pub_key_size
-
-        # Extract private_key
-        priv_key_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        private_key = data[offset:offset+priv_key_size]
-        offset += priv_key_size
-
-        # Extract packet
-        packet_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        packet_bytes = data[offset:offset+packet_size]
+        public_key_bytes, private_key_bytes, packet_bytes, mode, identity = vc.unpack_encrypted_packet(data)
         packet = np.frombuffer(packet_bytes, dtype=np.uint8)
-        offset += packet_size
-
-        # Extract mode
-        mode_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        mode = data[offset:offset+mode_size].decode('utf-8')
-        offset += mode_size
-
-        # Extract identity
-        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        identity_bytes = data[offset:offset+identity_size]
-        offset += identity_size
-        if identity_size != 8:
-            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
-        identity = struct.unpack('<Q', identity_bytes)[0]
         data_dict = {
-            "public_key": public_key,
-            "private_key": private_key,
+            "public_key": public_key_bytes,
+            "private_key": private_key_bytes,
             "packet": packet,
             "mode": mode,
             "identity": identity

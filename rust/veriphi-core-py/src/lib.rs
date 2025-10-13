@@ -243,6 +243,31 @@ pub fn package_blob(py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<PyObj
     Ok(PyBytes::new(py, &packed).into())
 }
 
+fn packet_err(err: utils::PacketDecodeError) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyValueError, _>(err.to_string())
+}
+
+#[pyfunction]
+pub fn unpack_setup_packet(py: Python<'_>, data: &[u8]) -> PyResult<(Py<PyBytes>, Py<PyBytes>, String, u64)> {
+    let (public_key, packet, mode, identity) = utils::unpack_setup_packet(data).map_err(packet_err)?;
+    let pk = PyBytes::new(py, &public_key).into();
+    let pkt = PyBytes::new(py, &packet).into();
+    Ok((pk, pkt, mode, identity))
+}
+
+#[pyfunction]
+pub fn unpack_encrypted_packet(
+    py: Python<'_>,
+    data: &[u8],
+) -> PyResult<(Py<PyBytes>, Py<PyBytes>, Py<PyBytes>, String, u64)> {
+    let (public_key, private_key, packet, mode, identity) =
+        utils::unpack_encrypted_packet(data).map_err(packet_err)?;
+    let pk = PyBytes::new(py, &public_key).into();
+    let sk = PyBytes::new(py, &private_key).into();
+    let pkt = PyBytes::new(py, &packet).into();
+    Ok((pk, sk, pkt, mode, identity))
+}
+
 /// Create the Python module
 #[pymodule]
 pub fn veriphi_core_py(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -257,5 +282,7 @@ pub fn veriphi_core_py(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(map_data, py)?)?;
     m.add_function(wrap_pyfunction!(inv_data, py)?)?;
     m.add_function(wrap_pyfunction!(package_blob, py)?)?;
+    m.add_function(wrap_pyfunction!(unpack_setup_packet, py)?)?;
+    m.add_function(wrap_pyfunction!(unpack_encrypted_packet, py)?)?;
     Ok(())
 }

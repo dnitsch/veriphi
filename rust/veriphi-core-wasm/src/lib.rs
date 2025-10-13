@@ -194,3 +194,28 @@ pub fn package_blob(fields: Array) -> Result<Vec<u8>, JsValue> {
     }
     Ok(utils::package_blob(items))
 }
+
+#[wasm_bindgen(js_name = unpackSetupPacket)]
+pub fn unpack_setup_packet(data: &[u8]) -> Result<Array, JsValue> {
+    let (public_key, packet, mode, identity) = utils::unpack_setup_packet(data)
+        .map_err(|e| JsError::new(&format!("unpack error: {e}")))?;
+    let out = Array::new();
+    out.push(&Uint8Array::from(public_key.as_slice()));
+    out.push(&Uint8Array::from(packet.as_slice()));
+    out.push(&JsValue::from(mode));
+    out.push(&JsValue::from_f64(identity as f64));
+    Ok(out)
+}
+
+#[wasm_bindgen(js_name = unpackEncryptedPacket)]
+pub fn unpack_encrypted_packet(data: &[u8]) -> Result<Array, JsValue> {
+    let (public_key, private_key, packet, mode, identity) = utils::unpack_encrypted_packet(data)
+        .map_err(|e| JsError::new(&format!("unpack error: {e}")))?;
+    let out = Array::new();
+    out.push(&Uint8Array::from(public_key.as_slice()));
+    out.push(&Uint8Array::from(private_key.as_slice()));
+    out.push(&Uint8Array::from(packet.as_slice()));
+    out.push(&JsValue::from(mode));
+    out.push(&JsValue::from_f64(identity as f64));
+    Ok(out)
+}
