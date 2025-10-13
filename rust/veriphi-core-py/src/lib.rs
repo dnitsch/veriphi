@@ -198,6 +198,7 @@ pub fn inv_data(
 }
 
 #[pyfunction]
+#[pyo3(signature = (*args))]
 pub fn package_blob(py: Python<'_>, args: &Bound<'_, PyTuple>) -> PyResult<PyObject> {
     fn as_field(obj: &Bound<'_, PyAny>) -> PyResult<utils::PackageField<'static>> {
         if let Ok(array) = obj.extract::<PyReadonlyArray1<u8>>() {

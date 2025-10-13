@@ -242,19 +242,11 @@ class SetupNode(Utils):
             bytes: The packaged data ready for transmission, including size headers.
         """
         packet_bytes = packet.tobytes()
-        mode_byte    = mode.encode('utf-8')
-        # And now package everything into bytes
-        payload = (
-            struct.pack('<Q', len(public_key)) + public_key +
-            struct.pack('<Q', len(packet_bytes)) + packet_bytes +
-            struct.pack('<Q', len(mode_byte)) + mode_byte +
-            struct.pack('<Q', identity)
-        )
-    
-        # Add total size header
-        total_size_header = struct.pack('<Q', len(payload))
-        
-        return total_size_header + payload
+        print(f"Setup package identity reported as {identity}")
+        identity_u64 = int(identity)
+        if identity_u64 < 0:
+            raise ValueError("identity must be non-negative")
+        return vc.package_blob(public_key, packet_bytes, mode, identity_u64)
 
 class EncryptNode(Utils):
     """
@@ -384,20 +376,10 @@ class EncryptNode(Utils):
         packet_bytes = embedding_dict["embedding"]
         private_key  = embedding_dict["private_key"]
         public_key   = embedding_dict["public_key"]
-        mode_byte    = mode.encode('utf-8')
-        # And now package everything into bytes
-        payload = (
-            struct.pack('<Q', len(public_key)) + public_key +
-            struct.pack('<Q', len(private_key)) + private_key +
-            struct.pack('<Q', len(packet_bytes)) + packet_bytes +
-            struct.pack('<Q', len(mode_byte)) + mode_byte +
-            struct.pack('<Q', identity)
-        )
-    
-        # Add total size header
-        total_size_header = struct.pack('<Q', len(payload))
-        
-        return total_size_header + payload
+        identity_u64 = int(identity)
+        if identity_u64 < 0:
+            raise ValueError("identity must be non-negative")
+        return vc.package_blob(public_key, private_key, packet_bytes, mode, identity_u64)
 
     def unpackage_data(self, data: bytes) -> tuple[bytes, NDArray[np.uint8], str, int]:
         """
@@ -437,9 +419,14 @@ class EncryptNode(Utils):
         mode = data[offset:offset+mode_size].decode('utf-8')
         offset += mode_size
         
-        # Extract label
-        identity = struct.unpack('<Q', data[offset:offset+8])[0]
-      
+        # Extract identity (length-prefixed)
+        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
+        offset += 8
+        identity_bytes = data[offset:offset+identity_size]
+        offset += identity_size
+        if identity_size != 8:
+            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
+        identity = struct.unpack('<Q', identity_bytes)[0]
         return public_key, packet, mode, identity
         
 
@@ -489,8 +476,14 @@ class EncryptNode(Utils):
         mode = data[offset:offset+mode_size].decode('utf-8')
         offset += mode_size
 
-        # Extract label
-        identity = struct.unpack('<Q', data[offset:offset+8])[0]
+        # Extract identity
+        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
+        offset += 8
+        identity_bytes = data[offset:offset+identity_size]
+        offset += identity_size
+        if identity_size != 8:
+            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
+        identity = struct.unpack('<Q', identity_bytes)[0]
         data_dict = {
             "public_key": public_key,
             "private_key": private_key,
@@ -565,7 +558,13 @@ class DecryptNode(Utils):
         offset += mode_size
 
         # Extract identity
-        identity = struct.unpack('<Q', data[offset:offset+8])[0]
+        identity_size = struct.unpack('<Q', data[offset:offset+8])[0]
+        offset += 8
+        identity_bytes = data[offset:offset+identity_size]
+        offset += identity_size
+        if identity_size != 8:
+            raise ValueError(f"Expected 8-byte identity, found {identity_size} bytes")
+        identity = struct.unpack('<Q', identity_bytes)[0]
         data_dict = {
             "public_key": public_key,
             "private_key": private_key,
