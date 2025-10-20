@@ -98,11 +98,12 @@ export class Utils {
    * @param key Buffer representing the key.
    * @throws If the key contains duplicate elements.
    */
-  checkKey(key: Buffer): void {
+  checkKey(key: Buffer): boolean {
     const unique = new Set(key);
     if (unique.size !== key.length) {
       throw new Error('Invalid key: key contains duplicate elements');
     }
+    return true;
   }
 }
 

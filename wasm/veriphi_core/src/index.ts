@@ -111,11 +111,12 @@ export class Utils {
    * @param key array representing the key.
    * @throws If the key contains duplicate elements.
    */
-  checkKey(key: Uint8Array): void {
+  checkKey(key: Uint8Array): boolean {
     const unique = new Set(key);
     if (unique.size !== key.length) {
       throw new Error('Invalid key: key contains duplicate elements');
     }
+    return true;
   }
 }
 

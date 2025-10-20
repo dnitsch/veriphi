@@ -48,13 +48,13 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Check key has all unique values
-fn check_key_bytes(key: &[u8]) -> Result<()> {
+fn check_key_bytes(key: &[u8]) -> Result<bool> {
     use std::collections::HashSet;
     let set: HashSet<u8> = key.iter().copied().collect();
     if set.len() != key.len() {
         return Err(Error::Mismatch);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// PBKDF2-SHA256 to derive a 32-byte key
@@ -373,7 +373,7 @@ impl Utils {
         Ok(k.to_vec())
     }
 
-    pub fn check_key(&self, key: &[u8]) -> Result<()> {
+    pub fn check_key(&self, key: &[u8]) -> Result<bool> {
         check_key_bytes(key)
     }
 }

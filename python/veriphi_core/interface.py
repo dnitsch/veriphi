@@ -45,7 +45,7 @@ class Utils:
         self.check_key(key)
         return key
     
-    def check_key(self,key: bytes) -> None:
+    def check_key(self,key: bytes) -> bool | None:
         """
         Validate that a cryptographic key contains no duplicate elements.
         
@@ -59,6 +59,7 @@ class Utils:
         key_list = list(key)
         if len(key_list) != len(np.unique(key_list)):
             raise ValueError("Invalid key: key contains duplicate elements")
+        return True
 
     def package_data(self):
         raise NotImplementedError("This method should be implemented by subclasses")
