@@ -242,7 +242,6 @@ class SetupNode(Utils):
             bytes: The packaged data ready for transmission, including size headers.
         """
         packet_bytes = packet.tobytes()
-        print(f"Setup package identity reported as {identity}")
         identity_u64 = int(identity)
         if identity_u64 < 0:
             raise ValueError("identity must be non-negative")
