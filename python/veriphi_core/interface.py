@@ -1,6 +1,7 @@
 import veriphi_core as vc
 import numpy as np
 import secrets
+import copy
 from numpy.typing import NDArray
 from . import utils as utils
 
@@ -642,7 +643,7 @@ def setup_node(data: NDArray[np.uint8],cond_low: np.float32, cond_high: np.float
         encrypted, nonce = setup_node.encrypt_data(data,private_key)
         encrypted = np.frombuffer(encrypted,dtype=np.uint8)
     else:
-        encrypted = data.copy()
+        encrypted = copy.copy(data)
         nonce = b""
     test_val = (cond_low + cond_high)/2
     low_val, high_val = setup_node.implement_conditions(cond_low, cond_high, private_key)
