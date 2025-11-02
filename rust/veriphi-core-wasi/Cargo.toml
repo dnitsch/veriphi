@@ -8,7 +8,7 @@ repository = "https://github.com/veriphi-labs/veriphi"
 readme = "../../README.md"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["rlib", "cdylib"]
 name = "veriphi"
 path = "src/lib.rs"
 
