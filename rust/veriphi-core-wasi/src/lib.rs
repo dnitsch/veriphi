@@ -6,15 +6,15 @@ use veriphi_core::{decrypt, encrypt, involute, utils};
 
 // ---------- Error codes ----------
 
-const OK: i32 = 0;
-const ERR_BUF_TOO_SMALL: i32 = -1;
-const ERR_INVALID_UTF8: i32 = -2;
-const ERR_INVALID_SEED: i32 = -3;
-const ERR_INTERNAL: i32 = -4;
+pub const OK: i32 = 0;
+pub const ERR_BUF_TOO_SMALL: i32 = -1;
+pub const ERR_INVALID_UTF8: i32 = -2;
+pub const ERR_INVALID_SEED: i32 = -3;
+pub const ERR_INTERNAL: i32 = -4;
 
 // ---------- helper funcs ----------
 #[inline]
-fn read_slice<'a>(ptr_: u32, len: u32) -> &'a [u8] {
+pub fn read_slice<'a>(ptr_: u32, len: u32) -> &'a [u8] {
     unsafe { slice::from_raw_parts(ptr_ as *const u8, len as usize) }
 }
 
@@ -37,14 +37,14 @@ pub fn read_slice_table(desc_ptr: u32, count: u32) -> Vec<Vec<u8>> {
 }
 
 // Always write required length (even on ERR_BUF_TOO_SMALL).
-fn write_required_len(out_len_ptr: u32, need: usize) {
+pub fn write_required_len(out_len_ptr: u32, need: usize) {
     unsafe {
         *(out_len_ptr as *mut u32) = need as u32;
     }
 }
 
 // Copy into caller buffer (assumes capacity checked by caller or prior path)
-fn write_out(out_ptr: u32, data: &[u8]) {
+pub fn write_out(out_ptr: u32, data: &[u8]) {
     unsafe {
         ptr::copy_nonoverlapping(data.as_ptr(), out_ptr as *mut u8, data.len());
     }
